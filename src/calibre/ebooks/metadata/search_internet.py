@@ -4,7 +4,8 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from urllib import quote_plus
+from polyglot.builtins import iteritems
+from polyglot.urllib import quote, quote_plus
 
 AUTHOR_SEARCHES = {
     'goodreads':
@@ -14,7 +15,7 @@ AUTHOR_SEARCHES = {
     'google':
     'https://www.google.com/search?tbm=bks&q=inauthor:%22{author}%22',
     'amzn':
-    'https://www.amazon.com/gp/search/ref=sr_adv_b/?search-alias=stripbooks&unfiltered=1&field-author={author}&field-dateop=During&sort=relevanceexprank'
+    'https://www.amazon.com/gp/search/ref=sr_adv_b/?search-alias=stripbooks&unfiltered=1&field-author={author}&sort=relevanceexprank'
 }
 
 BOOK_SEARCHES = {
@@ -47,14 +48,21 @@ all_book_searches = BOOK_SEARCHES.__iter__
 all_author_searches = AUTHOR_SEARCHES.__iter__
 
 
-def qquote(val):
+def qquote(val, use_plus=True):
     if not isinstance(val, bytes):
         val = val.encode('utf-8')
-    return quote_plus(val).decode('utf-8')
+    ans = quote_plus(val) if use_plus else quote(val)
+    if isinstance(ans, bytes):
+        ans = ans.decode('utf-8')
+    return ans
+
+
+def specialised_quote(template, val):
+    return qquote(val, 'goodreads.com' not in template)
 
 
 def url_for(template, data):
-    return template.format(**{k: qquote(v) for k, v in data.iteritems()})
+    return template.format(**{k: specialised_quote(template, v) for k, v in iteritems(data)})
 
 
 def url_for_author_search(key, **kw):

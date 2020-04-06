@@ -2,8 +2,7 @@
 # vim:fileencoding=utf-8
 # License: GPLv3 Copyright: 2016, Kovid Goyal <kovid at kovidgoyal.net>
 
-from __future__ import (unicode_literals, division, absolute_import,
-                        print_function)
+from __future__ import absolute_import, division, print_function, unicode_literals
 from io import BytesIO
 from itertools import count
 from functools import partial
@@ -20,6 +19,7 @@ from calibre.ebooks.oeb.polish.utils import guess_type
 from calibre.ebooks.oeb.base import OEB_DOCS
 from calibre.ebooks.metadata.book.base import Metadata
 from calibre.ebooks.metadata.opf3 import CALIBRE_PREFIX
+from polyglot.builtins import unicode_type
 
 OPF_TEMPLATE = '''
 <package xmlns="http://www.idpf.org/2007/opf" version="{ver}" prefix="calibre: %s" unique-identifier="uid">
@@ -64,7 +64,7 @@ def create_epub(manifest, spine=(), guide=(), meta_cover=None, ver=3):
 </container>''')
         zf.writestr('content.opf', opf.encode('utf-8'))
         for name, data, properties in manifest:
-            if isinstance(data, type('')):
+            if isinstance(data, unicode_type):
                 data = data.encode('utf-8')
             zf.writestr(name, data)
     buf.seek(0)
@@ -78,7 +78,7 @@ class Structure(BaseTest):
 
     def create_epub(self, *args, **kw):
         n = next(counter)
-        ep = os.path.join(self.tdir, str(n) + 'book.epub')
+        ep = os.path.join(self.tdir, unicode_type(n) + 'book.epub')
         with open(ep, 'wb') as f:
             f.write(create_epub(*args, **kw).getvalue())
         c = get_container(ep, tdir=os.path.join(self.tdir, 'container%d' % n), tweak_mode=True)
@@ -94,7 +94,7 @@ class Structure(BaseTest):
         self.assertEqual(3, c.opf_version_parsed.major)
         self.assertTrue(len(get_toc(c)))  # detect NCX toc even in epub 3 files
         c.add_file('nav.html', b'<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
-                   '<body><nav epub:type="toc"><ol><li><a href="start.xhtml">EPUB 3 nav</a></li></ol></nav></body></html>',
+                   b'<body><nav epub:type="toc"><ol><li><a href="start.xhtml">EPUB 3 nav</a></li></ol></nav></body></html>',
                    process_manifest_item=lambda item:item.set('properties', 'nav'))
         toc = get_toc(c)
         self.assertTrue(len(toc))
@@ -132,9 +132,9 @@ class Structure(BaseTest):
         c = self.create_epub([cmi('xxx.html'), cmi('a.html')], ver=3)
         self.assertEqual(3, c.opf_version_parsed.major)
         c.add_file('xxx/nav.html', b'<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
-                   '<body><nav epub:type="landmarks"><ol><li><a epub:type="x" href="../xxx.html#moo">XXX </a></li>'
-                   '<li><a href="../a.html"> YYY </a></li>'
-                   '</ol></nav></body></html>',
+                   b'<body><nav epub:type="landmarks"><ol><li><a epub:type="x" href="../xxx.html#moo">XXX </a></li>'
+                   b'<li><a href="../a.html"> YYY </a></li>'
+                   b'</ol></nav></body></html>',
                    process_manifest_item=lambda item:item.set('properties', 'nav'))
         self.assertEqual([
             {'dest':'xxx.html', 'frag':'moo', 'type':'x', 'title':'XXX'}, {'dest':'a.html', 'frag':'', 'type':'', 'title':'YYY'}

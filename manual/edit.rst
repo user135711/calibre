@@ -175,6 +175,12 @@ book, by right clicking on the file again and choosing :guilabel:`Replace with
 file...` which will allow you to replace the file in the book with
 the previously exported file.
 
+You can also copy files between multiple editor instances. Select
+the files you want to copy in the :guilabel:`File browser`, then right click
+and choose, :guilabel:`Copy selected files to another editor instance`. Then,
+in the other editor instance, right click in the :guilabel:`File browser`
+and choose :guilabel:`Paste file from other editor instance`.
+
 Adding new images/fonts/etc. or creating new blank files
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -561,7 +567,7 @@ Splitting HTML files
 .. |spmb| image:: images/split-button.png
 
 One, perhaps non-obvious, use of the preview panel is to split long HTML files.
-While viewing the file you want to split, click the :guilabel:`split mode`
+While viewing the file you want to split, click the :guilabel:`Split mode`
 button under the preview panel |spmb|. Then simply move your mouse to the place
 where you want to split the file and click. A thick green line will show you
 exactly where the split will happen as you move your mouse. Once you have found
@@ -664,8 +670,8 @@ common in your book and to run a simple search and replace on individual words.
 
 .. note::
     If you make any changes to the book by editing files while the spell check
-    tool is open, you should click the :guilabel:`Refresh` button in the spell
-    check tool. If you do not do this and continue to use the spell check tool,
+    tool is open, you should click the :guilabel:`Refresh` button in the Spell
+    check tool. If you do not do this and continue to use the Spell check tool,
     you could lose the changes you have made in the editor.
 
 Adding new dictionaries
@@ -726,7 +732,7 @@ Checking external links
 
 You can use this tool to check all links in your book that point to external
 websites. The tool will try to visit every externally linked website, and
-if the visit fails, it will report all broken links in a convenient format for 
+if the visit fails, it will report all broken links in a convenient format for
 you to fix.
 
 
@@ -796,7 +802,8 @@ The HTML editor has very sophisticated syntax highlighting. Features include:
     * The text inside bold, italic and heading tags is made bold/italic
     * As you move your cursor through the HTML, the matching HTML tags are
       highlighted, and you can jump to the opening or closing tag with the
-      keyboard shortcuts :kbd:`Ctrl+{` and :kbd:`Ctrl+}`
+      keyboard shortcuts :kbd:`Ctrl+{` and :kbd:`Ctrl+}`. Similarly, you
+      can select the contents of a tag with :kbd:`Ctrl+Alt+T`.
     * Invalid HTML is highlighted with a red underline
     * Spelling errors in the text inside HTML tags and attributes such as title
       are highlighted. The spell checking is language aware, based on the value

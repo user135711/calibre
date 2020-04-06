@@ -1,5 +1,6 @@
 #!/usr/bin/env python2
 # vim:fileencoding=UTF-8:ts=4:sw=4:sta:et:sts=4:ai
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 __license__   = 'GPL v3'
 __copyright__ = '2010, Kovid Goyal <kovid@kovidgoyal.net>'
@@ -13,7 +14,7 @@ from PyQt5.Qt import (QComboBox, QLabel, QSpinBox, QDoubleSpinBox, QDateTimeEdit
         QSpacerItem, QIcon, QCheckBox, QWidget, QHBoxLayout, QLineEdit,
         QPushButton, QMessageBox, QToolButton, Qt, QPlainTextEdit)
 
-from calibre.utils.date import qt_to_dt, now, as_local_time, as_utc
+from calibre.utils.date import qt_to_dt, now, as_local_time, as_utc, internal_iso_format_string
 from calibre.gui2.complete2 import EditWithComplete
 from calibre.gui2.comments_editor import Editor as CommentsEditor
 from calibre.gui2 import UNDEFINED_QDATETIME, error_dialog
@@ -23,6 +24,14 @@ from calibre.utils.icu import sort_key
 from calibre.library.comments import comments_to_html
 from calibre.gui2.library.delegates import ClearingDoubleSpinBox, ClearingSpinBox
 from calibre.gui2.widgets2 import RatingEditor
+from polyglot.builtins import unicode_type
+
+
+def safe_disconnect(signal):
+    try:
+        signal.disconnect()
+    except Exception:
+        pass
 
 
 class Base(object):
@@ -31,7 +40,22 @@ class Base(object):
         self.db, self.col_id = db, col_id
         self.col_metadata = db.custom_column_num_map[col_id]
         self.initial_val = self.widgets = None
+        self.signals_to_disconnect = []
         self.setup_ui(parent)
+        key = db.field_metadata.label_to_key(self.col_metadata['label'],
+                                                       prefer_custom=True)
+        description = self.col_metadata.get('display', {}).get('description', '')
+        if description:
+            description = key + ': ' + description
+        else:
+            description = key
+        try:
+            self.widgets[1].setToolTip(description)
+        except:
+            try:
+                self.widgets[0].setToolTip(description)
+            except:
+                pass
 
     def initialize(self, book_id):
         val = self.db.get_custom(book_id, num=self.col_id, index_is_id=True)
@@ -66,6 +90,12 @@ class Base(object):
 
     def break_cycles(self):
         self.db = self.widgets = self.initial_val = None
+        for signal in self.signals_to_disconnect:
+            safe_disconnect(signal)
+        self.signals_to_disconnect = []
+
+    def connect_data_changed(self, slot):
+        pass
 
 
 class SimpleText(Base):
@@ -74,10 +104,14 @@ class SimpleText(Base):
         self.widgets = [QLabel('&'+self.col_metadata['name']+':', parent), QLineEdit(parent)]
 
     def setter(self, val):
-        self.widgets[1].setText(type(u'')(val or ''))
+        self.widgets[1].setText(unicode_type(val or ''))
 
     def getter(self):
         return self.widgets[1].text().strip()
+
+    def connect_data_changed(self, slot):
+        self.widgets[1].textChanged.connect(slot)
+        self.signals_to_disconnect.append(self.widgets[1].textChanged)
 
 
 class LongText(Base):
@@ -93,10 +127,14 @@ class LongText(Base):
         self.widgets = [self._box]
 
     def setter(self, val):
-        self._tb.setPlainText(type(u'')(val or ''))
+        self._tb.setPlainText(unicode_type(val or ''))
 
     def getter(self):
         return self._tb.toPlainText()
+
+    def connect_data_changed(self, slot):
+        self._tb.textChanged.connect(slot)
+        self.signals_to_disconnect.append(self._tb.textChanged)
 
 
 class Bool(Base):
@@ -165,6 +203,10 @@ class Bool(Base):
     def set_to_cleared(self):
         self.combobox.setCurrentIndex(2)
 
+    def connect_data_changed(self, slot):
+        self.combobox.currentTextChanged.connect(slot)
+        self.signals_to_disconnect.append(self.combobox.currentTextChanged)
+
 
 class Int(Base):
 
@@ -195,6 +237,10 @@ class Int(Base):
             self.setter(0)
         self.was_none = to_what == self.widgets[1].minimum()
 
+    def connect_data_changed(self, slot):
+        self.widgets[1].valueChanged.connect(slot)
+        self.signals_to_disconnect.append(self.widgets[1].valueChanged)
+
 
 class Float(Int):
 
@@ -222,6 +268,10 @@ class Rating(Base):
 
     def getter(self):
         return self.widgets[1].rating_value or None
+
+    def connect_data_changed(self, slot):
+        self.widgets[1].currentTextChanged.connect(slot)
+        self.signals_to_disconnect.append(self.widgets[1].currentTextChanged)
 
 
 class DateTimeEdit(QDateTimeEdit):
@@ -274,6 +324,8 @@ class DateTime(Base):
         format_ = cm['display'].get('date_format','')
         if not format_:
             format_ = 'dd MMM yyyy hh:mm'
+        elif format_ == 'iso':
+            format_ = internal_iso_format_string()
         w.setDisplayFormat(format_)
         w.setCalendarPopup(True)
         w.setMinimumDateTime(UNDEFINED_QDATETIME)
@@ -302,6 +354,10 @@ class DateTime(Base):
     def normalize_ui_val(self, val):
         return as_utc(val) if val is not None else None
 
+    def connect_data_changed(self, slot):
+        self.widgets[1].dateTimeChanged.connect(slot)
+        self.signals_to_disconnect.append(self.widgets[1].dateTimeChanged)
+
 
 class Comments(Base):
 
@@ -309,7 +365,7 @@ class Comments(Base):
         self._box = QGroupBox(parent)
         self._box.setTitle('&'+self.col_metadata['name'])
         self._layout = QVBoxLayout()
-        self._tb = CommentsEditor(self._box, toolbar_prefs_name=u'metadata-comments-editor-widget-hidden-toolbars')
+        self._tb = CommentsEditor(self._box, toolbar_prefs_name='metadata-comments-editor-widget-hidden-toolbars')
         self._tb.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         # self._tb.setTabChangesFocus(True)
         self._layout.addWidget(self._tb)
@@ -331,19 +387,22 @@ class Comments(Base):
         self._tb.wyswyg_dirtied()
 
     def getter(self):
-        val = unicode(self._tb.html).strip()
+        val = unicode_type(self._tb.html).strip()
         if not val:
             val = None
         return val
 
-    @dynamic_property
+    @property
     def tab(self):
-        def fget(self):
-            return self._tb.tab
+        return self._tb.tab
 
-        def fset(self, val):
-            self._tb.tab = val
-        return property(fget=fget, fset=fset)
+    @tab.setter
+    def tab(self, val):
+        self._tb.tab = val
+
+    def connect_data_changed(self, slot):
+        self._tb.data_changed.connect(slot)
+        self.signals_to_disconnect.append(self._tb.data_changed)
 
 
 class MultipleWidget(QWidget):
@@ -453,12 +512,12 @@ class Text(Base):
 
     def getter(self):
         if self.col_metadata['is_multiple']:
-            val = unicode(self.widgets[1].text()).strip()
+            val = unicode_type(self.widgets[1].text()).strip()
             ans = [x.strip() for x in val.split(self.sep['ui_to_list']) if x.strip()]
             if not ans:
                 ans = None
             return ans
-        val = unicode(self.widgets[1].currentText()).strip()
+        val = unicode_type(self.widgets[1].currentText()).strip()
         if not val:
             val = None
         return val
@@ -480,6 +539,14 @@ class Text(Base):
         d = TagEditor(self.parent, self.db, self.book_id, self.key)
         if d.exec_() == TagEditor.Accepted:
             self.setter(d.tags)
+
+    def connect_data_changed(self, slot):
+        if self.col_metadata['is_multiple']:
+            s = self.widgets[1].tags_box.currentTextChanged
+        else:
+            s = self.widgets[1].currentTextChanged
+        s.connect(slot)
+        self.signals_to_disconnect.append(s)
 
 
 class Series(Base):
@@ -519,7 +586,7 @@ class Series(Base):
         self.initial_val, self.initial_index = self.current_val
 
     def getter(self):
-        n = unicode(self.name_widget.currentText()).strip()
+        n = unicode_type(self.name_widget.currentText()).strip()
         i = self.idx_widget.value()
         return n, i
 
@@ -554,6 +621,11 @@ class Series(Base):
         val, s_index = self.current_val
         mi.set('#' + self.col_metadata['label'], val, extra=s_index)
 
+    def connect_data_changed(self, slot):
+        for s in self.widgets[1].editTextChanged, self.widgets[3].valueChanged:
+            s.connect(slot)
+            self.signals_to_disconnect.append(s)
+
 
 class Enumeration(Base):
 
@@ -586,7 +658,7 @@ class Enumeration(Base):
         self.widgets[1].setCurrentIndex(self.widgets[1].findText(val))
 
     def getter(self):
-        return unicode(self.widgets[1].currentText())
+        return unicode_type(self.widgets[1].currentText())
 
     def normalize_db_val(self, val):
         if val is None:
@@ -597,6 +669,10 @@ class Enumeration(Base):
         if not val:
             val = None
         return val
+
+    def connect_data_changed(self, slot):
+        self.widgets[1].currentIndexChanged.connect(slot)
+        self.signals_to_disconnect.append(self.widgets[1].currentIndexChanged)
 
 
 def comments_factory(db, key, parent):
@@ -669,7 +745,8 @@ def populate_metadata_page(layout, db, book_id, bulk=False, two_column=False, pa
     count = len(cols)
     layout_rows_for_comments = 9
     if two_column:
-        turnover_point = ((count-comments_not_in_tweak+1) + comments_in_tweak*(layout_rows_for_comments-1))/2
+        turnover_point = int(((count - comments_not_in_tweak + 1) +
+                                int(comments_in_tweak*(layout_rows_for_comments-1)))/2)
     else:
         # Avoid problems with multi-line widgets
         turnover_point = count + 1000
@@ -696,7 +773,7 @@ def populate_metadata_page(layout, db, book_id, bulk=False, two_column=False, pa
                 column = 0
                 row = max_row
                 base_row = row
-                turnover_point = row + (comments_not_in_tweak * layout_rows_for_comments)/2
+                turnover_point = row + int((comments_not_in_tweak * layout_rows_for_comments)/2)
                 comments_not_in_tweak = 0
 
         l = QGridLayout()
@@ -765,7 +842,7 @@ class BulkBase(Base):
         return self._cached_gui_val_
 
     def get_initial_value(self, book_ids):
-        values = set([])
+        values = set()
         for book_id in book_ids:
             val = self.db.get_custom(book_id, num=self.col_id, index_is_id=True)
             if isinstance(val, list):
@@ -775,7 +852,7 @@ class BulkBase(Base):
                 break
         ans = None
         if len(values) == 1:
-            ans = iter(values).next()
+            ans = next(iter(values))
         if isinstance(ans, frozenset):
             ans = list(ans)
         return ans
@@ -965,10 +1042,12 @@ class BulkDateTime(BulkBase):
         l.addStretch(2)
 
         w = self.main_widget
-        format = cm['display'].get('date_format','')
-        if not format:
-            format = 'dd MMM yyyy'
-        w.setDisplayFormat(format)
+        format_ = cm['display'].get('date_format','')
+        if not format_:
+            format_ = 'dd MMM yyyy'
+        elif format_ == 'iso':
+            format_ = internal_iso_format_string()
+        w.setDisplayFormat(format_)
         w.setCalendarPopup(True)
         w.setMinimumDateTime(UNDEFINED_QDATETIME)
         w.setSpecialValueText(_('Undefined'))
@@ -1101,7 +1180,7 @@ class BulkSeries(BulkBase):
         self.a_c_checkbox.setChecked(False)
 
     def getter(self):
-        n = unicode(self.main_widget.currentText()).strip()
+        n = unicode_type(self.main_widget.currentText()).strip()
         autonumber = self.idx_widget.checkState()
         force = self.force_number.checkState()
         start = self.series_start_number.value()
@@ -1171,7 +1250,7 @@ class BulkEnumeration(BulkBase, Enumeration):
         self.main_widget.blockSignals(False)
 
     def getter(self):
-        return unicode(self.main_widget.currentText())
+        return unicode_type(self.main_widget.currentText())
 
     def setter(self, val):
         if val is None:
@@ -1275,10 +1354,10 @@ class BulkText(BulkBase):
                 else:
                     txt = rtext
                     if txt:
-                        remove = set([v.strip() for v in txt.split(ism['ui_to_list'])])
+                        remove = {v.strip() for v in txt.split(ism['ui_to_list'])}
                 txt = adding
                 if txt:
-                    add = set([v.strip() for v in txt.split(ism['ui_to_list'])])
+                    add = {v.strip() for v in txt.split(ism['ui_to_list'])}
                 else:
                     add = set()
                 self.db.set_custom_bulk_multiple(book_ids, add=add,
@@ -1292,10 +1371,10 @@ class BulkText(BulkBase):
         if self.col_metadata['is_multiple']:
             if not self.col_metadata['display'].get('is_names', False):
                 return self.removing_widget.checkbox.isChecked(), \
-                        unicode(self.adding_widget.text()), \
-                        unicode(self.removing_widget.tags_box.text())
-            return unicode(self.adding_widget.text())
-        val = unicode(self.main_widget.currentText()).strip()
+                        unicode_type(self.adding_widget.text()), \
+                        unicode_type(self.removing_widget.tags_box.text())
+            return unicode_type(self.adding_widget.text())
+        val = unicode_type(self.main_widget.currentText()).strip()
         if not val:
             val = None
         return val

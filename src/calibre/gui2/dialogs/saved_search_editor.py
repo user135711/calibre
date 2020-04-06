@@ -1,6 +1,7 @@
 #!/usr/bin/env python2
 # vim:fileencoding=utf-8
 # License: GPLv3 Copyright: 2008, Kovid Goyal <kovid at kovidgoyal.net>
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 
 from PyQt5.Qt import (
@@ -93,7 +94,7 @@ class SavedSearchEditor(Dialog):
     def __init__(self, parent, initial_search=None):
         self.initial_search = initial_search
         Dialog.__init__(
-            self, _('Manage saved searches'), 'manage-saved-searches', parent)
+            self, _('Manage Saved searches'), 'manage-saved-searches', parent)
 
     def setup_ui(self):
         from calibre.gui2.ui import get_gui

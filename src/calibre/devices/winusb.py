@@ -2,10 +2,9 @@
 # vim:fileencoding=utf-8
 # License: GPLv3 Copyright: 2016, Kovid Goyal <kovid at kovidgoyal.net>
 
-from __future__ import (unicode_literals, division, absolute_import,
-                        print_function)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-import os, string, _winreg as winreg, re, sys
+import os, string, re, sys
 from collections import namedtuple, defaultdict
 from operator import itemgetter
 from ctypes import (
@@ -15,11 +14,17 @@ from ctypes import (
 )
 from ctypes.wintypes import DWORD, WORD, ULONG, LPCWSTR, HWND, BOOL, LPWSTR, UINT, BYTE, HANDLE, USHORT
 from pprint import pprint, pformat
-from future_builtins import map
+from polyglot.builtins import iteritems, itervalues, map, filter
 
 from calibre import prints, as_unicode
 
 is64bit = sys.maxsize > (1 << 32)
+
+try:
+    import winreg
+except ImportError:
+    import _winreg as winreg
+
 
 # Data and function type definitions {{{
 
@@ -53,6 +58,7 @@ class GUID(Structure):
             ''.join(["%02x" % d for d in self.data4[2:]]),
         )
 
+
 CONFIGRET = DWORD
 DEVINST = DWORD
 LPDWORD = POINTER(DWORD)
@@ -70,6 +76,8 @@ def CTL_CODE(DeviceType, Function, Method, Access):
 def USB_CTL(id):
     # CTL_CODE(FILE_DEVICE_USB, (id), METHOD_BUFFERED, FILE_ANY_ACCESS)
     return CTL_CODE(0x22, id, 0, 0)
+
+
 IOCTL_USB_GET_ROOT_HUB_NAME = USB_CTL(258)
 IOCTL_USB_GET_NODE_INFORMATION = USB_CTL(258)
 IOCTL_USB_GET_NODE_CONNECTION_INFORMATION = USB_CTL(259)
@@ -108,6 +116,7 @@ class SP_DEVINFO_DATA(Structure):
     def __str__(self):
         return "ClassGuid:%s DevInst:%s" % (self.ClassGuid, self.DevInst)
 
+
 PSP_DEVINFO_DATA = POINTER(SP_DEVINFO_DATA)
 
 
@@ -122,6 +131,7 @@ class SP_DEVICE_INTERFACE_DATA(Structure):
     def __str__(self):
         return "InterfaceClassGuid:%s Flags:%s" % (self.InterfaceClassGuid, self.Flags)
 
+
 ANYSIZE_ARRAY = 1
 
 
@@ -130,6 +140,7 @@ class SP_DEVICE_INTERFACE_DETAIL_DATA(Structure):
         ("cbSize", DWORD),
         ("DevicePath", c_wchar*ANYSIZE_ARRAY)
     ]
+
 
 UCHAR = c_ubyte
 
@@ -216,12 +227,13 @@ class USB_DESCRIPTOR_REQUEST(Structure):
         ('Data', USB_STRING_DESCRIPTOR),
     )
 
+
 PUSB_DESCRIPTOR_REQUEST = POINTER(USB_DESCRIPTOR_REQUEST)
 PSP_DEVICE_INTERFACE_DETAIL_DATA = POINTER(SP_DEVICE_INTERFACE_DETAIL_DATA)
 PSP_DEVICE_INTERFACE_DATA = POINTER(SP_DEVICE_INTERFACE_DATA)
 INVALID_HANDLE_VALUE = c_void_p(-1).value
-GENERIC_READ = 0x80000000L
-GENERIC_WRITE = 0x40000000L
+GENERIC_READ = 0x80000000
+GENERIC_WRITE = 0x40000000
 FILE_SHARE_READ = 0x1
 FILE_SHARE_WRITE = 0x2
 OPEN_EXISTING = 0x3
@@ -389,6 +401,7 @@ def config_err_check(result, func, args):
     if result != CR_CODES['CR_SUCCESS']:
         raise WindowsError(result, 'The cfgmgr32 function failed with err: %s' % CR_CODE_NAMES.get(result, result))
     return args
+
 
 GetLogicalDrives = cwrap('GetLogicalDrives', DWORD, errcheck=bool_err_check, lib=kernel32)
 GetDriveType = cwrap('GetDriveTypeW', UINT, LPCWSTR, lib=kernel32)
@@ -644,13 +657,13 @@ def get_volume_information(drive_letter):
         'max_component_length': max_component_length.value,
     }
 
-    for name, num in {'FILE_CASE_PRESERVED_NAMES':0x00000002, 'FILE_CASE_SENSITIVE_SEARCH':0x00000001, 'FILE_FILE_COMPRESSION':0x00000010,
+    for name, num in iteritems({'FILE_CASE_PRESERVED_NAMES':0x00000002, 'FILE_CASE_SENSITIVE_SEARCH':0x00000001, 'FILE_FILE_COMPRESSION':0x00000010,
               'FILE_NAMED_STREAMS':0x00040000, 'FILE_PERSISTENT_ACLS':0x00000008, 'FILE_READ_ONLY_VOLUME':0x00080000,
               'FILE_SEQUENTIAL_WRITE_ONCE':0x00100000, 'FILE_SUPPORTS_ENCRYPTION':0x00020000, 'FILE_SUPPORTS_EXTENDED_ATTRIBUTES':0x00800000,
               'FILE_SUPPORTS_HARD_LINKS':0x00400000, 'FILE_SUPPORTS_OBJECT_IDS':0x00010000, 'FILE_SUPPORTS_OPEN_BY_FILE_ID':0x01000000,
               'FILE_SUPPORTS_REPARSE_POINTS':0x00000080, 'FILE_SUPPORTS_SPARSE_FILES':0x00000040, 'FILE_SUPPORTS_TRANSACTIONS':0x00200000,
               'FILE_SUPPORTS_USN_JOURNAL':0x02000000, 'FILE_UNICODE_ON_DISK':0x00000004, 'FILE_VOLUME_IS_COMPRESSED':0x00008000,
-              'FILE_VOLUME_QUOTAS':0x00000020}.iteritems():
+              'FILE_VOLUME_QUOTAS':0x00000020}):
         ans[name] = bool(num & flags)
     return ans
 
@@ -669,11 +682,12 @@ def get_volume_pathnames(volume_id, buf=None):
                 continue
             raise
     ans = wstring_at(buf, bufsize.value)
-    return buf, filter(None, ans.split('\0'))
+    return buf, list(filter(None, ans.split('\0')))
 
 # }}}
 
 # def scan_usb_devices(): {{{
+
 
 _USBDevice = namedtuple('USBDevice', 'vendor_id product_id bcd devid devinst')
 
@@ -764,7 +778,7 @@ def get_drive_letters_for_device_single(usbdev, storage_number_map, debug=False)
             if debug:
                 try:
                     devid = get_device_id(devinfo.DevInst)[0]
-                except Exception as err:
+                except Exception:
                     devid = 'Unknown'
             try:
                 storage_number = get_storage_number(devpath)
@@ -800,7 +814,7 @@ def get_storage_number_map(drive_types=(DRIVE_REMOVABLE, DRIVE_FIXED), debug=Fal
     ' Get a mapping of drive letters to storage numbers for all drives on system (of the specified types) '
     mask = GetLogicalDrives()
     type_map = {letter:GetDriveType(letter + ':' + os.sep) for i, letter in enumerate(string.ascii_uppercase) if mask & (1 << i)}
-    drives = (letter for letter, dt in type_map.iteritems() if dt in drive_types)
+    drives = (letter for letter, dt in iteritems(type_map) if dt in drive_types)
     ans = defaultdict(list)
     for letter in drives:
         try:
@@ -810,7 +824,7 @@ def get_storage_number_map(drive_types=(DRIVE_REMOVABLE, DRIVE_FIXED), debug=Fal
             if debug:
                 prints('Failed to get storage number for drive: %s with error: %s' % (letter, as_unicode(err)))
             continue
-    for val in ans.itervalues():
+    for val in itervalues(ans):
         val.sort(key=itemgetter(0))
     return dict(ans)
 
@@ -850,7 +864,7 @@ def get_storage_number_map_alt(debug=False):
             if debug:
                 prints('Failed to get storage number for drive: %s with error: %s' % (name[0], as_unicode(err)))
             continue
-    for val in ans.itervalues():
+    for val in itervalues(ans):
         val.sort(key=itemgetter(0))
     return dict(ans)
 
@@ -970,7 +984,7 @@ def get_device_languages(hub_handle, device_port, buf=None):
     if dtype != 0x03:
         raise WindowsError('Invalid datatype for string descriptor: 0x%x' % dtype)
     data = cast(data.String, POINTER(USHORT*(sz//2)))
-    return buf, filter(None, data.contents)
+    return buf, list(filter(None, data.contents))
 
 # }}}
 
@@ -986,8 +1000,7 @@ def develop():  # {{{
     drive_letters = set()
     pprint(usb_devices)
     print()
-    devplugins = list(sorted(device_plugins(), cmp=lambda
-            x,y:cmp(x.__class__.__name__, y.__class__.__name__)))
+    devplugins = list(sorted(device_plugins(), key=lambda x: x.__class__.__name__))
     for dev in devplugins:
         dev.startup()
     for dev in devplugins:
@@ -1016,6 +1029,7 @@ def drives_for(vendor_id, product_id=None):
             print('Drives for: {}'.format(usbdev))
             pprint(get_drive_letters_for_device(usbdev, debug=True))
             print('USB info:', get_usb_info(usbdev, debug=True))
+
 
 if __name__ == '__main__':
     develop()

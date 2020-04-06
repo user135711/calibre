@@ -1,4 +1,6 @@
 #!/usr/bin/env  python2
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 __license__   = 'GPL v3'
 __copyright__ = '2008, Kovid Goyal kovid@kovidgoyal.net'
 __docformat__ = 'restructuredtext en'
@@ -17,6 +19,7 @@ from calibre.gui2.dialogs.quickview_ui import Ui_Quickview
 from calibre.utils.date import timestampfromdt
 from calibre.utils.icu import sort_key
 from calibre.utils.iso8601 import UNDEFINED_DATE
+from polyglot.builtins import unicode_type
 
 
 class TableItem(QTableWidgetItem):
@@ -42,7 +45,7 @@ class TableItem(QTableWidgetItem):
             # self is not None and other is None therefore self >= other
             return True
 
-        if isinstance(self.sort, (str, unicode)):
+        if isinstance(self.sort, (bytes, unicode_type)):
             l = sort_key(self.sort)
             r = sort_key(other.sort)
         else:
@@ -65,7 +68,7 @@ class TableItem(QTableWidgetItem):
             # self is not None therefore self > other
             return False
 
-        if isinstance(self.sort, (str, unicode)):
+        if isinstance(self.sort, (bytes, unicode_type)):
             l = sort_key(self.sort)
             r = sort_key(other.sort)
         else:
@@ -152,8 +155,9 @@ class Quickview(QDialog, Ui_Quickview):
             self.books_table_column_widths = \
                         gprefs.get('quickview_dialog_books_table_widths', None)
             if not self.is_pane:
-                geom = gprefs.get('quickview_dialog_geometry', bytearray(''))
-                self.restoreGeometry(QByteArray(geom))
+                geom = gprefs.get('quickview_dialog_geometry', None)
+                if geom:
+                    QApplication.instance().safe_restore_geometry(self, QByteArray(geom))
         except:
             pass
 
@@ -269,6 +273,8 @@ class Quickview(QDialog, Ui_Quickview):
     def show_context_menu(self, point):
         index = self.books_table.indexAt(point)
         item = self.books_table.item(index.row(), 0)
+        if item is None:
+            return False;
         book_id = int(item.data(Qt.UserRole))
         self.context_menu = QMenu(self)
         self.context_menu.addAction(self.view_icon, _('View'),
@@ -406,26 +412,29 @@ class Quickview(QDialog, Ui_Quickview):
     def item_selected(self, txt):
         if self.no_valid_items:
             return
-        self.fill_in_books_box(unicode(txt))
+        self.fill_in_books_box(unicode_type(txt))
         self.set_search_text(self.current_key + ':"=' + txt.replace('"', '\\"') + '"')
 
     def refresh(self, idx):
         '''
         Given a cell in the library view, display the information. This method
-        converts the index into the lookup ken
+        converts the index into the lookup key
         '''
         if self.lock_qv.isChecked():
             return
 
         try:
-            bv_row = idx.row()
-            self.current_column = idx.column()
+            self.current_column = (
+                self.view.column_map.index('authors') if
+                    self.current_column is None and self.view.column_map[idx.column()] == 'title'
+                else idx.column())
             key = self.view.column_map[self.current_column]
-            book_id = self.view.model().id(bv_row)
+            book_id = self.view.model().id(idx.row())
             if self.current_book_id == book_id and self.current_key == key:
                 return
             self._refresh(book_id, key)
         except:
+            traceback.print_exc()
             self.indicate_no_items()
 
     def _refresh(self, book_id, key):
@@ -455,9 +464,9 @@ class Quickview(QDialog, Ui_Quickview):
             self.no_valid_items = False
             if self.fm[key]['datatype'] == 'rating':
                 if self.fm[key]['display'].get('allow_half_stars', False):
-                    vals = unicode(vals/2.0)
+                    vals = unicode_type(vals/2.0)
                 else:
-                    vals = unicode(vals/2)
+                    vals = unicode_type(vals//2)
             if not isinstance(vals, list):
                 vals = [vals]
             vals.sort(key=sort_key)
@@ -585,7 +594,7 @@ class Quickview(QDialog, Ui_Quickview):
             # have a width. Assume 25. Not a problem because user-changed column
             # widths will be remembered
             w = self.books_table.width() - 25 - self.books_table.verticalHeader().width()
-            w /= self.books_table.columnCount()
+            w //= self.books_table.columnCount()
             for c in range(0, self.books_table.columnCount()):
                 self.books_table.setColumnWidth(c, w)
         self.save_state()

@@ -1,5 +1,6 @@
 #!/usr/bin/env python2
 # vim:fileencoding=UTF-8:ts=4:sw=4:sta:et:sts=4:ai
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 __license__   = 'GPL v3'
 __copyright__ = '2010, Kovid Goyal <kovid@kovidgoyal.net>'
@@ -7,13 +8,12 @@ __docformat__ = 'restructuredtext en'
 
 import itertools, operator
 from functools import partial
-from future_builtins import map
 from collections import OrderedDict
 
 from PyQt5.Qt import (
     QTableView, Qt, QAbstractItemView, QMenu, pyqtSignal, QFont, QModelIndex,
     QIcon, QItemSelection, QMimeData, QDrag, QStyle, QPoint, QUrl, QHeaderView,
-    QStyleOptionHeader, QItemSelectionModel, QSize, QFontMetrics)
+    QStyleOptionHeader, QItemSelectionModel, QSize, QFontMetrics, QApplication)
 
 from calibre.constants import islinux
 from calibre.gui2.library.delegates import (RatingDelegate, PubDateDelegate,
@@ -30,6 +30,7 @@ from calibre.gui2.library import DEFAULT_SORT
 from calibre.constants import filesystem_encoding
 from calibre import force_unicode
 from calibre.utils.icu import primary_sort_key
+from polyglot.builtins import iteritems, map, range, unicode_type
 
 
 def restrict_column_width(self, col, old_size, new_size):
@@ -72,7 +73,7 @@ class HeaderView(QHeaderView):  # {{{
         opt.orientation = self.orientation()
         opt.fontMetrics = self.fm
         model = self.parent().model()
-        opt.text = unicode(model.headerData(logical_index, opt.orientation, Qt.DisplayRole) or '')
+        opt.text = unicode_type(model.headerData(logical_index, opt.orientation, Qt.DisplayRole) or '')
         if opt.orientation == Qt.Vertical:
             try:
                 val = model.headerData(logical_index, opt.orientation, Qt.DecorationRole)
@@ -99,7 +100,7 @@ class HeaderView(QHeaderView):  # {{{
         if self.isSortIndicatorShown() and self.sortIndicatorSection() == logical_index:
             opt.sortIndicator = QStyleOptionHeader.SortDown if self.sortIndicatorOrder() == Qt.AscendingOrder else QStyleOptionHeader.SortUp
             margin += style.pixelMetric(style.PM_HeaderMarkSize, None, self)
-        opt.text = unicode(model.headerData(logical_index, opt.orientation, Qt.DisplayRole) or '')
+        opt.text = unicode_type(model.headerData(logical_index, opt.orientation, Qt.DisplayRole) or '')
         if self.textElideMode() != Qt.ElideNone:
             opt.text = opt.fontMetrics.elidedText(opt.text, Qt.ElideRight, rect.width() - margin)
         if self.isEnabled():
@@ -185,18 +186,17 @@ class PreserveViewState(object):  # {{{
                         view.horizontalScrollBar().setValue(self.hscroll)
         self.init_vals()
 
-    @dynamic_property
+    @property
     def state(self):
-        def fget(self):
-            self.__enter__()
-            return {x:getattr(self, x) for x in ('selected_ids', 'current_id',
-                'vscroll', 'hscroll')}
+        self.__enter__()
+        return {x:getattr(self, x) for x in ('selected_ids', 'current_id',
+            'vscroll', 'hscroll')}
 
-        def fset(self, state):
-            for k, v in state.iteritems():
-                setattr(self, k, v)
-            self.__exit__()
-        return property(fget=fget, fset=fset)
+    @state.setter
+    def state(self, state):
+        for k, v in iteritems(state):
+            setattr(self, k, v)
+        self.__exit__()
 
 # }}}
 
@@ -254,8 +254,8 @@ class BooksView(QTableView):  # {{{
         setup_dnd_interface(self)
         for wv in self, self.pin_view:
             wv.setAlternatingRowColors(True)
-            wv.setShowGrid(False)
             wv.setWordWrap(False)
+        self.refresh_grid()
 
         self.rating_delegate = RatingDelegate(self)
         self.half_rating_delegate = RatingDelegate(self, is_half_star=True)
@@ -403,6 +403,8 @@ class BooksView(QTableView):  # {{{
         elif action.startswith('align_'):
             alignment = action.partition('_')[-1]
             self._model.change_alignment(column, alignment)
+        elif action.startswith('font_'):
+            self._model.change_column_font(column, action[len('font_'):])
         elif action == 'quickview':
             from calibre.gui2.actions.show_quickview import get_quickview_action_plugin
             qv = get_quickview_action_plugin()
@@ -433,10 +435,22 @@ class BooksView(QTableView):  # {{{
             m = ans.addMenu(_('Change text alignment for %s') % name)
             al = self._model.alignment_map.get(col, 'left')
             for x, t in (('left', _('Left')), ('right', _('Right')), ('center', _('Center'))):
-                    a = m.addAction(t, partial(handler, action='align_'+x))
-                    if al == x:
+                a = m.addAction(t, partial(handler, action='align_'+x))
+                if al == x:
+                    a.setCheckable(True)
+                    a.setChecked(True)
+            if not isinstance(view, DeviceBooksView):
+                col_font = self._model.styled_columns.get(col)
+                m = ans.addMenu(_('Change font style for %s') % name)
+                for x, t, f in (
+                        ('normal', _('Normal font'), None), ('bold', _('Bold font'), self._model.bold_font),
+                        ('italic', _('Italic font'), self._model.italic_font), ('bi', _('Bold and Italic font'), self._model.bi_font),
+                ):
+                    a = m.addAction(t, partial(handler, action='font_' + x))
+                    if f is col_font:
                         a.setCheckable(True)
                         a.setChecked(True)
+
         if self.is_library_view:
             if self._model.db.field_metadata[col]['is_category']:
                 act = ans.addAction(_('Quickview column %s') % name, partial(handler, action='quickview'))
@@ -450,7 +464,7 @@ class BooksView(QTableView):  # {{{
         ans.addSeparator()
         if hidden_cols:
             m = ans.addMenu(_('Show column'))
-            hcols = [(hcol, unicode(self.model().headerData(hidx, Qt.Horizontal, Qt.DisplayRole) or '')) for hcol, hidx in hidden_cols.iteritems()]
+            hcols = [(hcol, unicode_type(self.model().headerData(hidx, Qt.Horizontal, Qt.DisplayRole) or '')) for hcol, hidx in iteritems(hidden_cols)]
             hcols.sort(key=lambda x: primary_sort_key(x[1]))
             for hcol, hname in hcols:
                 m.addAction(hname, partial(handler, action='show', column=hcol))
@@ -469,14 +483,19 @@ class BooksView(QTableView):  # {{{
         col = None
         if idx > -1 and idx < len(self.column_map):
             col = self.column_map[idx]
-            name = unicode(self.model().headerData(idx, Qt.Horizontal, Qt.DisplayRole) or '')
+            name = unicode_type(self.model().headerData(idx, Qt.Horizontal, Qt.DisplayRole) or '')
             view.column_header_context_menu = self.create_context_menu(col, name, view)
         has_context_menu = hasattr(view, 'column_header_context_menu')
         if self.is_library_view and has_context_menu:
             view.column_header_context_menu.addSeparator()
-            view.column_header_context_menu.addAction(
-                _('Un-split the book list') if self.pin_view.isVisible() else _('Split the book list'),
-                partial(self.column_header_context_handler, action='split', column=col or 'title'))
+            if not hasattr(view.column_header_context_menu, 'bl_split_action'):
+                view.column_header_context_menu.bl_split_action = view.column_header_context_menu.addAction(
+                        'xxx', partial(self.column_header_context_handler, action='split', column='title'))
+            ac = view.column_header_context_menu.bl_split_action
+            if self.pin_view.isVisible():
+                ac.setText(_('Un-split the book list'))
+            else:
+                ac.setText(_('Split the book list'))
         if has_context_menu:
             view.column_header_context_menu.popup(view.column_header.mapToGlobal(pos))
     # }}}
@@ -492,17 +511,18 @@ class BooksView(QTableView):  # {{{
             ch.blockSignals(False)
 
     def sort_by_column_and_order(self, col, ascending):
+        order = Qt.AscendingOrder if ascending else Qt.DescendingOrder
         self.column_header.blockSignals(True)
-        self.sortByColumn(col, Qt.AscendingOrder if ascending else Qt.DescendingOrder)
+        self.column_header.setSortIndicator(col, order)
         self.column_header.blockSignals(False)
+        self.model().sort(col, order)
         if self.is_library_view:
             self.set_sort_indicator(col, ascending)
 
     def user_sort_requested(self, col, order=Qt.AscendingOrder):
-        if col >= len(self.column_map) or col < 0:
-            return QTableView.sortByColumn(self, col)
-        field = self.column_map[col]
-        self.intelligent_sort(field, order == Qt.AscendingOrder)
+        if 0 <= col < len(self.column_map):
+            field = self.column_map[col]
+            self.intelligent_sort(field, order == Qt.AscendingOrder)
 
     def pin_view_user_sort_requested(self, col, order=Qt.AscendingOrder):
         if col < len(self.column_map) and col >= 0:
@@ -556,7 +576,7 @@ class BooksView(QTableView):  # {{{
                 return
 
         for n,d in reversed(fields):
-            if n in self._model.db.field_metadata.keys():
+            if n in list(self._model.db.field_metadata.keys()):
                 sh.insert(0, (n, d))
         sh = self.cleanup_sort_history(sh, ignore_column_map=True)
         self._model.sort_history = [tuple(x) for x in sh]
@@ -605,7 +625,7 @@ class BooksView(QTableView):  # {{{
 
     def write_state(self, state):
         db = getattr(self.model(), 'db', None)
-        name = unicode(self.objectName())
+        name = unicode_type(self.objectName())
         if name and db is not None:
             db.new_api.set_pref(name + ' books view state', state)
 
@@ -635,7 +655,10 @@ class BooksView(QTableView):  # {{{
         if self.is_library_view:
             for col, order in reversed(self.cleanup_sort_history(
                     saved_history, ignore_column_map=True)[:max_sort_levels]):
-                self.sort_by_named_field(col, order)
+                try:
+                    self.sort_by_named_field(col, order)
+                except KeyError:
+                    pass
         else:
             for col, order in reversed(self.cleanup_sort_history(
                     saved_history)[:max_sort_levels]):
@@ -665,7 +688,7 @@ class BooksView(QTableView):  # {{{
         # Because of a bug in Qt 5 we have to ensure that the header is actually
         # relaid out by changing this value, without this sometimes ghost
         # columns remain visible when changing libraries
-        for i in xrange(h.count()):
+        for i in range(h.count()):
             val = h.isSectionHidden(i)
             h.setSectionHidden(i, not val)
             h.setSectionHidden(i, val)
@@ -717,7 +740,7 @@ class BooksView(QTableView):  # {{{
 
     def get_old_state(self):
         ans = None
-        name = unicode(self.objectName())
+        name = unicode_type(self.objectName())
         if name:
             name += ' books view state'
             db = getattr(self.model(), 'db', None)
@@ -785,6 +808,10 @@ class BooksView(QTableView):  # {{{
     def refresh_row_sizing(self):
         self.row_sizing_done = False
         self.do_row_sizing()
+
+    def refresh_grid(self):
+        for wv in self, self.pin_view:
+            wv.setShowGrid(bool(gprefs['booklist_grid']))
 
     def do_row_sizing(self):
         # Resize all rows to have the correct height
@@ -933,6 +960,56 @@ class BooksView(QTableView):  # {{{
         self.show_context_menu(self.context_menu, event)
     # }}}
 
+    def handle_mouse_press_event(self, ev):
+        if QApplication.keyboardModifiers() & Qt.ShiftModifier:
+            # Shift-Click in QTableView is badly behaved.
+            index = self.indexAt(ev.pos())
+            if not index.isValid():
+                return QTableView.mousePressEvent(self, ev)
+            ci = self.currentIndex()
+            if not ci.isValid():
+                return QTableView.mousePressEvent(self, ev)
+            clicked_row = index.row()
+            current_row = ci.row()
+            sm = self.selectionModel()
+            if clicked_row == current_row:
+                sm.setCurrentIndex(index, sm.NoUpdate)
+                return
+            sr = sm.selectedRows()
+            if not len(sr):
+                sm.select(index, sm.Select | sm.Clear | sm.Current | sm.Rows)
+                return
+
+            m = self.model()
+
+            def new_selection(upper, lower):
+                top_left = m.index(upper, 0)
+                bottom_right = m.index(lower, m.columnCount(None) - 1)
+                return QItemSelection(top_left, bottom_right)
+
+            currently_selected = tuple(x.row() for x in sr)
+            min_row = min(currently_selected)
+            max_row = max(currently_selected)
+            outside_current_selection = clicked_row < min_row or clicked_row > max_row
+            existing_selection = sm.selection()
+            if outside_current_selection:
+                # We simply extend the current selection
+                if clicked_row < min_row:
+                    upper, lower = clicked_row, min_row
+                else:
+                    upper, lower = max_row, clicked_row
+                existing_selection.merge(new_selection(upper, lower), sm.Select)
+            else:
+                if current_row < clicked_row:
+                    upper, lower = current_row, clicked_row
+                else:
+                    upper, lower  = clicked_row, current_row
+                existing_selection.merge(new_selection(upper, lower), sm.Toggle)
+            sm.select(existing_selection, sm.ClearAndSelect)
+            sm.setCurrentIndex(index, sm.Select | sm.Rows)  # ensure clicked row is always selected
+        else:
+            return QTableView.mousePressEvent(self, ev)
+
     @property
     def column_map(self):
         return self._model.column_map
@@ -940,12 +1017,14 @@ class BooksView(QTableView):  # {{{
     @property
     def visible_columns(self):
         h = self.horizontalHeader()
-        logical_indices = (x for x in xrange(h.count()) if not h.isSectionHidden(x))
+        logical_indices = (x for x in range(h.count()) if not h.isSectionHidden(x))
         rmap = {i:x for i, x in enumerate(self.column_map)}
         return (rmap[h.visualIndex(x)] for x in logical_indices if h.visualIndex(x) > -1)
 
-    def refresh_book_details(self):
+    def refresh_book_details(self, force=False):
         idx = self.currentIndex()
+        if not idx.isValid() and force:
+            idx = self.model().index(0, 0)
         if idx.isValid():
             self._model.current_changed(idx, idx)
             return True
@@ -1004,7 +1083,7 @@ class BooksView(QTableView):  # {{{
                     h.visualIndex(x) > -1]
             if not pairs:
                 pairs = [(0, 0)]
-            pairs.sort(cmp=lambda x,y:cmp(x[1], y[1]))
+            pairs.sort(key=lambda x: x[1])
             i = pairs[0][0]
             index = self.model().index(row, i)
             if for_sync:
@@ -1081,7 +1160,7 @@ class BooksView(QTableView):  # {{{
         row_map = OrderedDict()
         ids = frozenset(ids)
         m = self.model()
-        for row in xrange(m.rowCount(QModelIndex())):
+        for row in range(m.rowCount(QModelIndex())):
             if len(row_map) >= len(ids):
                 break
             c = m.id(row)
@@ -1095,13 +1174,13 @@ class BooksView(QTableView):  # {{{
         Select rows identified by identifiers. identifiers can be a set of ids,
         row numbers or QModelIndexes.
         '''
-        rows = set([x.row() if hasattr(x, 'row') else x for x in
-            identifiers])
+        rows = {x.row() if hasattr(x, 'row') else x for x in
+            identifiers}
         if using_ids:
-            rows = set([])
+            rows = set()
             identifiers = set(identifiers)
             m = self.model()
-            for row in xrange(m.rowCount(QModelIndex())):
+            for row in range(m.rowCount(QModelIndex())):
                 if m.id(row) in identifiers:
                     rows.add(row)
         rows = list(sorted(rows))
@@ -1118,7 +1197,7 @@ class BooksView(QTableView):  # {{{
         # Create a range based selector for each set of contiguous rows
         # as supplying selectors for each individual row causes very poor
         # performance if a large number of rows has to be selected.
-        for k, g in itertools.groupby(enumerate(rows), lambda (i,x):i-x):
+        for k, g in itertools.groupby(enumerate(rows), lambda i_x:i_x[0]-i_x[1]):
             group = list(map(operator.itemgetter(1), g))
             sel.merge(QItemSelection(m.index(min(group), 0),
                 m.index(max(group), max_col)), sm.Select)
@@ -1134,24 +1213,23 @@ class BooksView(QTableView):  # {{{
                 ans.append(i)
         return ans
 
-    @dynamic_property
+    @property
     def current_id(self):
-        def fget(self):
-            try:
-                return self.model().id(self.currentIndex())
-            except:
-                pass
-            return None
+        try:
+            return self.model().id(self.currentIndex())
+        except:
+            pass
+        return None
 
-        def fset(self, val):
-            if val is None:
-                return
-            m = self.model()
-            for row in xrange(m.rowCount(QModelIndex())):
-                if m.id(row) == val:
-                    self.set_current_row(row, select=False)
-                    break
-        return property(fget=fget, fset=fset)
+    @current_id.setter
+    def current_id(self, val):
+        if val is None:
+            return
+        m = self.model()
+        for row in range(m.rowCount(QModelIndex())):
+            if m.id(row) == val:
+                self.set_current_row(row, select=False)
+                break
 
     @property
     def next_id(self):
@@ -1166,7 +1244,7 @@ class BooksView(QTableView):  # {{{
             i.isValid()])
         column = ci.column()
 
-        for i in xrange(ci.row()+1, self.row_count()):
+        for i in range(ci.row()+1, self.row_count()):
             if i in selected_rows:
                 continue
             try:
@@ -1175,7 +1253,7 @@ class BooksView(QTableView):  # {{{
                 pass
 
         # No unselected rows after the current row, look before
-        for i in xrange(ci.row()-1, -1, -1):
+        for i in range(ci.row()-1, -1, -1):
             if i in selected_rows:
                 continue
             try:
@@ -1281,14 +1359,14 @@ class DeviceBooksView(BooksView):  # {{{
 
     def get_old_state(self):
         ans = None
-        name = unicode(self.objectName())
+        name = unicode_type(self.objectName())
         if name:
             name += ' books view state'
             ans = gprefs.get(name, None)
         return ans
 
     def write_state(self, state):
-        name = unicode(self.objectName())
+        name = unicode_type(self.objectName())
         if name:
             gprefs.set(name + ' books view state', state)
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python2
 # vim:fileencoding=UTF-8:ts=4:sw=4:sta:et:sts=4:ai
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 __license__   = 'GPL v3'
 __copyright__ = '2010, Kovid Goyal <kovid@kovidgoyal.net>'
@@ -12,13 +13,14 @@ from PyQt5.Qt import (QMenu, Qt, QInputDialog, QToolButton, QDialog,
         QDialogButtonBox, QGridLayout, QLabel, QLineEdit, QIcon, QSize,
         QCoreApplication, pyqtSignal, QVBoxLayout, QTimer, QAction)
 
-from calibre import isbytestring, sanitize_file_name_unicode
+from calibre import isbytestring, sanitize_file_name
 from calibre.constants import (filesystem_encoding, iswindows, get_portable_base, isportable)
 from calibre.utils.config import prefs, tweaks
 from calibre.utils.icu import sort_key
 from calibre.gui2 import (gprefs, warning_dialog, Dispatcher, error_dialog,
     question_dialog, info_dialog, open_local_file, choose_dir)
 from calibre.gui2.actions import InterfaceAction
+from polyglot.builtins import unicode_type, range
 
 
 def db_class():
@@ -38,7 +40,7 @@ class LibraryUsageStats(object):  # {{{
                 # Rename the current library. Renaming of other libraries is
                 # handled by the switch function
                 q = os.path.basename(lp)
-                for loc in list(self.stats.iterkeys()):
+                for loc in list(self.stats):
                     bn = posixpath.basename(loc)
                     if bn.lower() == q.lower():
                         self.rename(loc, lp)
@@ -49,8 +51,7 @@ class LibraryUsageStats(object):  # {{{
 
     def write_stats(self):
         locs = list(self.stats.keys())
-        locs.sort(cmp=lambda x, y: cmp(self.stats[x], self.stats[y]),
-                reverse=True)
+        locs.sort(key=lambda x: self.stats[x], reverse=True)
         for key in locs[500:]:
             self.stats.pop(key)
         gprefs.set('library_usage_stats', self.stats)
@@ -143,7 +144,7 @@ class MovedDialog(QDialog):  # {{{
         self.stats.remove(self.location)
 
     def accept(self):
-        newloc = unicode(self.loc.text())
+        newloc = unicode_type(self.loc.text())
         if not db_class().exists_at(newloc):
             error_dialog(self, _('No library found'),
                     _('No existing calibre library found at %s')%newloc,
@@ -193,6 +194,8 @@ class BackupStatus(QDialog):  # {{{
 
     def mark_all_dirty(self):
         db = self.db()
+        if db is None:
+            return
         db.new_api.mark_as_dirty(db.new_api.all_book_ids())
 
 # }}}
@@ -203,7 +206,7 @@ class ChooseLibraryAction(InterfaceAction):
     name = 'Choose Library'
     action_spec = (_('Choose Library'), 'lt.png',
             _('Choose calibre library to work with'), None)
-    dont_add_to = frozenset(['context-menu-device'])
+    dont_add_to = frozenset(('context-menu-device',))
     action_add_menu = True
     action_menu_clone_qaction = _('Switch/create library...')
     restore_view_state = pyqtSignal(object)
@@ -249,9 +252,11 @@ class ChooseLibraryAction(InterfaceAction):
         for i in range(5):
             ac = self.create_action(spec=('', None, None, None),
                     attr='switch_action%d'%i)
+            ac.setObjectName(unicode_type(i))
             self.switch_actions.append(ac)
             ac.setVisible(False)
-            ac.triggered.connect(partial(self.qs_requested, i),
+            connect_lambda(ac.triggered, self, lambda self:
+                    self.switch_requested(self.qs_locations[int(self.gui.sender().objectName())]),
                     type=Qt.QueuedConnection)
             self.choose_menu.addAction(ac)
 
@@ -276,6 +281,14 @@ class ChooseLibraryAction(InterfaceAction):
         self.view_state_map = {}
         self.restore_view_state.connect(self._restore_view_state,
                 type=Qt.QueuedConnection)
+        ac = self.create_action(spec=(_('Switch to previous library'), 'lt.png',
+                                      None, None),
+                                      attr='action_previous_library')
+        ac.triggered.connect(self.switch_to_previous_library, type=Qt.QueuedConnection)
+        self.gui.keyboard.register_shortcut(
+            self.unique_name + '-' + 'action_previous_library',
+            ac.text(), action=ac, group=self.action_spec[0], default_keys=('Ctrl+Alt+p',))
+        self.gui.addAction(ac)
 
     @property
     def preserve_state_on_switch(self):
@@ -319,11 +332,12 @@ class ChooseLibraryAction(InterfaceAction):
         a.setWhatsThis(tooltip)
 
     def library_changed(self, db):
-        self.prev_lname = self.last_lname
         lname = self.stats.library_used(db)
-        self.last_lname = lname
+        if lname != self.last_lname:
+            self.prev_lname = self.last_lname
+            self.last_lname = lname
         if len(lname) > 16:
-            lname = lname[:16] + u'…'
+            lname = lname[:16] + '…'
         a = self.qaction
         a.setText(lname.replace('&', '&&&'))  # I have no idea why this requires a triple ampersand
         self.update_tooltip(db.count())
@@ -338,6 +352,15 @@ class ChooseLibraryAction(InterfaceAction):
 
     def initialization_complete(self):
         self.library_changed(self.gui.library_view.model().db)
+
+    def switch_to_previous_library(self):
+        db = self.gui.library_view.model().db
+        locations = list(self.stats.locations(db))
+        for name, loc in locations:
+            is_prev_lib = name == self.prev_lname
+            if is_prev_lib:
+                self.switch_requested(loc)
+                break
 
     def build_menus(self):
         if os.environ.get('CALIBRE_OVERRIDE_DATABASE_PATH', None):
@@ -370,6 +393,8 @@ class ChooseLibraryAction(InterfaceAction):
                 name, loc)))
             delete_actions.append(ac)
             ac.setStatusTip(_('Remove: %s') % loc)
+            if is_prev_lib:
+                ac.setFont(f)
 
         qs_actions = []
         locations_by_frequency = locations
@@ -398,6 +423,7 @@ class ChooseLibraryAction(InterfaceAction):
     def location_selected(self, loc):
         enabled = loc == 'library'
         self.qaction.setEnabled(enabled)
+        self.menuless_qaction.setEnabled(enabled)
 
     def rename_requested(self, name, location):
         LibraryDatabase = db_class()
@@ -409,7 +435,7 @@ class ChooseLibraryAction(InterfaceAction):
                     'Choose a new name for the library <b>%s</b>. ')%name + '<p>'+_(
                     'Note that the actual library folder will be renamed.'),
                 text=old_name)
-        newname = sanitize_file_name_unicode(unicode(newname))
+        newname = sanitize_file_name(unicode_type(newname))
         if not ok or not newname or newname == old_name:
             return
         newloc = os.path.join(base, newname)
@@ -585,20 +611,17 @@ class ChooseLibraryAction(InterfaceAction):
         import gc
         from calibre.utils.mem import memory
         ref = self.dbref
-        for i in xrange(3):
+        for i in range(3):
             gc.collect()
         if ref() is not None:
-            print 'DB object alive:', ref()
+            print('DB object alive:', ref())
             for r in gc.get_referrers(ref())[:10]:
-                print r
-                print
-        print 'before:', self.before_mem
-        print 'after:', memory()
-        print
+                print(r)
+                print()
+        print('before:', self.before_mem)
+        print('after:', memory())
+        print()
         self.dbref = self.before_mem = None
-
-    def qs_requested(self, idx, *args):
-        self.switch_requested(self.qs_locations[idx])
 
     def count_changed(self, new_count):
         self.update_tooltip(new_count)

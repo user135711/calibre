@@ -2,12 +2,11 @@
 # License: GPL v3 Copyright: 2016, Kovid Goyal <kovid at kovidgoyal.net>
 from __python__ import bound_methods, hash_literals
 
-from book_list.globals import get_read_ui
-from read_book.globals import get_boss
+from read_book.globals import get_boss, ui_operations
 from read_book.viewport import scroll_viewport
 
 HOLD_THRESHOLD = 750  # milliseconds
-TAP_THRESHOLD = 7  # pixels
+TAP_THRESHOLD = 8  # pixels
 TAP_LINK_THRESHOLD = 5  # pixels
 PINCH_THRESHOLD = 10  # pixels
 LONG_TAP_THRESHOLD = 500  # milliseconds
@@ -141,6 +140,12 @@ class TouchHandler:
                 return True
         return False
 
+    def reset_handlers(self):
+        self.stop_hold_timer()
+        self.ongoing_touches = {}
+        self.gesture_id = None
+        self.handled_tap_hold = False
+
     def start_hold_timer(self):
         self.stop_hold_timer()
         self.hold_timer = window.setTimeout(self.check_for_hold, 100)
@@ -200,9 +205,7 @@ class TouchHandler:
         self.prune_expired_touches()
         if not self.has_active_touches:
             self.dispatch_gesture()
-            self.ongoing_touches = {}
-            self.gesture_id = None
-            self.handled_tap_hold = False
+            self.reset_handlers()
 
     def handle_touchcancel(self, ev):
         ev.preventDefault(), ev.stopPropagation()
@@ -257,7 +260,7 @@ class BookTouchHandler(TouchHandler):
                 return
             gesture.type = 'show-chrome'
         if self.for_side_margin:
-            get_read_ui().view.forward_gesture(gesture)
+            ui_operations.forward_gesture(gesture)
         else:
             get_boss().handle_gesture(gesture)
 
@@ -279,6 +282,12 @@ def create_handlers():
     # Safari does not work if we register the handler
     # on window instead of document
     install_handlers(document, main_touch_handler)
+    # See https://github.com/kovidgoyal/calibre/pull/1101
+    # for why we need touchAction none
+    document.body.style.touchAction = 'none'
+
+def reset_handlers():
+    main_touch_handler.reset_handlers()
 
 def set_left_margin_handler(elem):
     install_handlers(elem, left_margin_handler)

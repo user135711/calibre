@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 __license__ = 'GPL 3'
 __copyright__ = '2009, John Schember <john@nachtimwald.com>'
@@ -19,7 +20,7 @@ class PDBOutput(OutputFormatPlugin):
     commit_name = 'pdb_output'
     ui_data = {'formats': tuple(ALL_FORMAT_WRITERS)}
 
-    options = set([
+    options = {
         OptionRecommendation(name='format', recommended_value='doc',
             level=OptionRecommendation.LOW,
             short_switch='f', choices=list(ALL_FORMAT_WRITERS),
@@ -32,15 +33,15 @@ class PDBOutput(OutputFormatPlugin):
         OptionRecommendation(name='inline_toc',
             recommended_value=False, level=OptionRecommendation.LOW,
             help=_('Add Table of Contents to beginning of the book.')),
-    ])
+    }
 
     def convert(self, oeb_book, output_path, input_plugin, opts, log):
         close = False
         if not hasattr(output_path, 'write'):
             close = True
-            if not os.path.exists(os.path.dirname(output_path)) and os.path.dirname(output_path) != '':
+            if not os.path.exists(os.path.dirname(output_path)) and os.path.dirname(output_path):
                 os.makedirs(os.path.dirname(output_path))
-            out_stream = open(output_path, 'wb')
+            out_stream = lopen(output_path, 'wb')
         else:
             out_stream = output_path
 

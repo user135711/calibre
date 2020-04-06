@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-from __future__ import (unicode_literals, division, absolute_import, print_function)
 
 __license__ = 'GPL 3'
 __copyright__ = '2011, John Schember <john@nachtimwald.com>'
@@ -12,7 +12,8 @@ from PyQt5.Qt import (Qt, QTreeView, QSize, QMenu)
 
 from calibre.customize.ui import store_plugins
 from calibre.gui2.metadata.single_download import RichTextDelegate
-from calibre.gui2.store.config.chooser.models import Matches
+from calibre.gui2.store.config.chooser.models import Matches, Delegate
+from polyglot.builtins import range
 
 
 class ResultsView(QTreeView):
@@ -26,11 +27,13 @@ class ResultsView(QTreeView):
         self.setIconSize(QSize(24, 24))
 
         self.rt_delegate = RichTextDelegate(self)
+        self.delegate = Delegate()
+        self.setItemDelegate(self.delegate)
 
         for i in self._model.HTML_COLS:
             self.setItemDelegateForColumn(i, self.rt_delegate)
 
-        for i in xrange(self._model.columnCount()):
+        for i in range(self._model.columnCount()):
             self.resizeColumnToContents(i)
 
         self.model().sort(1, Qt.AscendingOrder)

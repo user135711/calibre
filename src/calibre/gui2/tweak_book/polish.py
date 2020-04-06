@@ -1,7 +1,6 @@
 #!/usr/bin/env python2
 # vim:fileencoding=utf-8
-from __future__ import (unicode_literals, division, absolute_import,
-                        print_function)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 __license__ = 'GPL v3'
 __copyright__ = '2014, Kovid Goyal <kovid at kovidgoyal.net>'
@@ -91,10 +90,11 @@ def show_report(changed, title, report, parent, show_current_diff):
     d.l.addWidget(d.e)
     d.e.setHtml(report)
     d.bb = QDialogButtonBox(QDialogButtonBox.Close)
+    d.show_changes = False
     if changed:
         b = d.b = d.bb.addButton(_('See what &changed'), d.bb.AcceptRole)
         b.setIcon(QIcon(I('diff.png'))), b.setAutoDefault(False)
-        b.clicked.connect(lambda : show_current_diff(allow_revert=True), type=Qt.QueuedConnection)
+        connect_lambda(b.clicked, d, lambda d: setattr(d, 'show_changes', True))
     b = d.bb.addButton(_('&Copy to clipboard'), d.bb.ActionRole)
     b.setIcon(QIcon(I('edit-copy.png'))), b.setAutoDefault(False)
 
@@ -112,6 +112,8 @@ def show_report(changed, title, report, parent, show_current_diff):
     d.resize(600, 400)
     d.exec_()
     b.clicked.disconnect()
+    if d.show_changes:
+        show_current_diff(allow_revert=True)
 
 # CompressImages {{{
 
@@ -164,7 +166,7 @@ class CompressImages(Dialog):
             x = QListWidgetItem(name, i)
             x.setData(Qt.UserRole, c.filesize(name))
         i.setSelectionMode(i.ExtendedSelection)
-        i.setMinimumHeight(500), i.setMinimumWidth(350)
+        i.setMinimumHeight(350), i.setMinimumWidth(350)
         i.selectAll(), i.setSpacing(5)
         self.delegate = ImageItemDelegate(self)
         i.setItemDelegate(self.delegate)
@@ -182,15 +184,19 @@ class CompressImages(Dialog):
         self.h2 = h = QHBoxLayout()
         l.addLayout(h)
         self.jq = jq = QSpinBox(self)
-        jq.setMinimum(0), jq.setMaximum(100), jq.setValue(80), jq.setEnabled(False)
+        jq.setMinimum(0), jq.setMaximum(100), jq.setValue(tprefs.get('jpeg_compression_quality_for_lossless_compression', 80)), jq.setEnabled(False)
         jq.setToolTip(_('The compression quality, 1 is high compression, 100 is low compression.\nImage'
                         ' quality is inversely correlated with compression quality.'))
+        jq.valueChanged.connect(self.save_compression_quality)
         el.toggled.connect(jq.setEnabled)
         self.jql = la = QLabel(_('Compression &quality:'))
         la.setBuddy(jq)
         h.addWidget(la), h.addWidget(jq)
         l.addStretch(10)
         l.addWidget(self.bb)
+
+    def save_compression_quality(self):
+        tprefs.set('jpeg_compression_quality_for_lossless_compression', self.jq.value())
 
     @property
     def names(self):

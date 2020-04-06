@@ -1,12 +1,10 @@
 #!/usr/bin/env python2
 # vim:fileencoding=utf-8
-from __future__ import (unicode_literals, division, absolute_import,
-                        print_function)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 __license__ = 'GPL v3'
 __copyright__ = '2015, Kovid Goyal <kovid at kovidgoyal.net>'
 
-from functools import partial
 from PyQt5.Qt import (
     QVBoxLayout, QSplitter, QWidget, QLabel, QCheckBox, QTextBrowser, Qt,
 )
@@ -116,7 +114,7 @@ class ChooseMerge(Dialog):
             l.addWidget(ans)
             prefs_key = ans.prefs_key = 'choose-merge-cb-' + name
             ans.setChecked(gprefs.get(prefs_key, True))
-            ans.stateChanged.connect(partial(self.state_changed, ans), type=Qt.QueuedConnection)
+            connect_lambda(ans.stateChanged, self, lambda self, state: self.state_changed(getattr(self, name), state), type=Qt.QueuedConnection)
             if tt:
                 ans.setToolTip(tt)
             setattr(self, name, ans)

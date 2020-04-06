@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 __license__   = 'GPL v3'
 __copyright__ = '2009, John Schember <john at nachtimwald.com>'
@@ -8,12 +9,13 @@ __docformat__ = 'restructuredtext en'
 Device driver for Amazon's Kindle
 '''
 
-import datetime, os, re, sys, json, hashlib, errno
+import datetime, os, re, json, hashlib, errno
 
-from calibre.constants import DEBUG
+from calibre.constants import DEBUG, filesystem_encoding
 from calibre.devices.kindle.bookmark import Bookmark
 from calibre.devices.usbms.driver import USBMS
 from calibre import strftime, fsync, prints
+from polyglot.builtins import unicode_type, as_bytes, as_unicode
 
 '''
 Notes on collections:
@@ -109,20 +111,18 @@ class KINDLE(USBMS):
         else:
             mi = cls.metadata_from_formats([path])
         if mi.title == _('Unknown') or ('-asin' in mi.title and '-type' in mi.title):
+            path = as_unicode(path, filesystem_encoding, 'replace')
             match = cls.WIRELESS_FILE_NAME_PATTERN.match(os.path.basename(path))
             if match is not None:
                 mi.title = match.group('title')
-                if not isinstance(mi.title, unicode):
-                    mi.title = mi.title.decode(sys.getfilesystemencoding(),
-                                               'replace')
         return mi
 
     def get_annotations(self, path_map):
-        MBP_FORMATS = [u'azw', u'mobi', u'prc', u'txt']
+        MBP_FORMATS = ['azw', 'mobi', 'prc', 'txt']
         mbp_formats = set(MBP_FORMATS)
-        PDR_FORMATS = [u'pdf']
+        PDR_FORMATS = ['pdf']
         pdr_formats = set(PDR_FORMATS)
-        TAN_FORMATS = [u'tpz', u'azw1']
+        TAN_FORMATS = ['tpz', 'azw1']
         tan_formats = set(TAN_FORMATS)
 
         def get_storage():
@@ -199,7 +199,7 @@ class KINDLE(USBMS):
         return bookmarked_books
 
     def generate_annotation_html(self, bookmark):
-        from calibre.ebooks.BeautifulSoup import BeautifulSoup, Tag
+        from calibre.ebooks.BeautifulSoup import BeautifulSoup
         # Returns <div class="user_annotations"> ... </div>
         last_read_location = bookmark.last_read_location
         timestamp = datetime.datetime.utcfromtimestamp(bookmark.timestamp)
@@ -207,28 +207,25 @@ class KINDLE(USBMS):
 
         ka_soup = BeautifulSoup()
         dtc = 0
-        divTag = Tag(ka_soup,'div')
+        divTag = ka_soup.new_tag('div')
         divTag['class'] = 'user_annotations'
 
         # Add the last-read location
-        spanTag = Tag(ka_soup, 'span')
-        spanTag['style'] = 'font-weight:bold'
         if bookmark.book_format == 'pdf':
-            spanTag.insert(0,BeautifulSoup(
-                _("%(time)s<br />Last page read: %(loc)d (%(pr)d%%)") % dict(
-                    time=strftime(u'%x', timestamp.timetuple()),
+            markup = _("%(time)s<br />Last page read: %(loc)d (%(pr)d%%)") % dict(
+                    time=strftime('%x', timestamp.timetuple()),
                     loc=last_read_location,
-                    pr=percent_read)))
+                    pr=percent_read)
         else:
-            spanTag.insert(0,BeautifulSoup(
-                _("%(time)s<br />Last page read: Location %(loc)d (%(pr)d%%)") % dict(
+            markup = _("%(time)s<br />Last page read: Location %(loc)d (%(pr)d%%)") % dict(
                     time=strftime(u'%x', timestamp.timetuple()),
                     loc=last_read_location,
-                    pr=percent_read)))
+                    pr=percent_read)
+        spanTag = BeautifulSoup('<span style="font-weight:bold">' + markup + '</span>').find('span')
 
         divTag.insert(dtc, spanTag)
         dtc += 1
-        divTag.insert(dtc, Tag(ka_soup,'br'))
+        divTag.insert(dtc, ka_soup.new_tag('br'))
         dtc += 1
 
         if bookmark.user_notes:
@@ -259,18 +256,19 @@ class KINDLE(USBMS):
                                     typ=user_notes[location]['type']))
 
             for annotation in annotations:
-                divTag.insert(dtc, BeautifulSoup(annotation))
+                annot = BeautifulSoup('<span>' + annotation + '</span>').find('span')
+                divTag.insert(dtc, annot)
                 dtc += 1
 
         ka_soup.insert(0,divTag)
         return ka_soup
 
     def add_annotation_to_library(self, db, db_id, annotation):
-        from calibre.ebooks.BeautifulSoup import Tag
         from calibre.ebooks.metadata import MetaInformation
+        from calibre.ebooks.BeautifulSoup import prettify
 
         bm = annotation
-        ignore_tags = set(['Catalog', 'Clippings'])
+        ignore_tags = {'Catalog', 'Clippings'}
 
         if bm.type == 'kindle_bookmark':
             mi = db.get_metadata(db_id, index_is_id=True)
@@ -286,13 +284,13 @@ class KINDLE(USBMS):
                 if set(mi.tags).intersection(ignore_tags):
                     return
                 if mi.comments:
-                    hrTag = Tag(user_notes_soup,'hr')
+                    hrTag = user_notes_soup.new_tag('hr')
                     hrTag['class'] = 'annotations_divider'
                     user_notes_soup.insert(0, hrTag)
 
-                mi.comments += unicode(user_notes_soup.prettify())
+                mi.comments += prettify(user_notes_soup)
             else:
-                mi.comments = unicode(user_notes_soup.prettify())
+                mi.comments = prettify(user_notes_soup)
             # Update library comments
             db.set_comment(db_id, mi.comments)
 
@@ -327,7 +325,7 @@ class KINDLE2(KINDLE):
     # (for X-Ray & End Actions), azw3f & azw3r files, but all of them are in
     # the .sdr sidecar folder
 
-    PRODUCT_ID = [0x0002, 0x0004]
+    PRODUCT_ID = [0x0002, 0x0004, 0x0324]
     BCD        = [0x0100, 0x0310, 0x401]
     # SUPPORTS_SUB_DIRS = False # Apparently the Paperwhite doesn't like files placed in subdirectories
     # SUPPORTS_SUB_DIRS_FOR_SCAN = True
@@ -428,12 +426,12 @@ class KINDLE2(KINDLE):
             for x in items:
                 x = x[-40:]
                 if x not in path_map:
-                    path_map[x] = set([])
+                    path_map[x] = set()
                 path_map[x].add(col)
         if path_map:
             for book in bl:
                 path = '/mnt/us/'+book.lpath
-                h = hashlib.sha1(path).hexdigest()
+                h = hashlib.sha1(as_bytes(path)).hexdigest()
                 if h in path_map:
                     book.device_collections = list(sorted(path_map[h]))
 
@@ -463,18 +461,28 @@ class KINDLE2(KINDLE):
         self.upload_apnx(path, filename, metadata, filepath)
 
     def thumbpath_from_filepath(self, filepath):
+        from calibre.ebooks.metadata.kfx import (CONTAINER_MAGIC, read_book_key_kfx)
         from calibre.ebooks.mobi.reader.headers import MetadataHeader
         from calibre.utils.logging import default_log
         thumb_dir = os.path.join(self._main_prefix, 'system', 'thumbnails')
         if not os.path.exists(thumb_dir):
             return
         with lopen(filepath, 'rb') as f:
-            mh = MetadataHeader(f, default_log)
-        if mh.exth is None or not mh.exth.uuid or not mh.exth.cdetype:
+            is_kfx = f.read(4) == CONTAINER_MAGIC
+            f.seek(0)
+            uuid = cdetype = None
+            if is_kfx:
+                uuid, cdetype = read_book_key_kfx(f)
+            else:
+                mh = MetadataHeader(f, default_log)
+                if mh.exth is not None:
+                    uuid = mh.exth.uuid
+                    cdetype = mh.exth.cdetype
+        if not uuid or not cdetype:
             return
         return os.path.join(thumb_dir,
                 'thumbnail_{uuid}_{cdetype}_portrait.jpg'.format(
-                    uuid=mh.exth.uuid, cdetype=mh.exth.cdetype))
+                    uuid=uuid, cdetype=cdetype))
 
     def upload_kindle_thumbnail(self, metadata, filepath):
         coverdata = getattr(metadata, 'thumbnail', None)
@@ -536,7 +544,7 @@ class KINDLE2(KINDLE):
                 cust_col_name = opts.extra_customization[self.OPT_APNX_METHOD_COL]
                 if cust_col_name:
                     try:
-                        temp = unicode(metadata.get(cust_col_name)).lower()
+                        temp = unicode_type(metadata.get(cust_col_name)).lower()
                         if temp in self.EXTRA_CUSTOMIZATION_CHOICES[self.OPT_APNX_METHOD]:
                             method = temp
                         else:
@@ -545,7 +553,7 @@ class KINDLE2(KINDLE):
                         print('Could not retrieve override method choice, using default.')
                 apnx_builder.write_apnx(filepath, apnx_path, method=method, page_count=custom_page_count)
             except:
-                print 'Failed to generate APNX'
+                print('Failed to generate APNX')
                 import traceback
                 traceback.print_exc()
 
